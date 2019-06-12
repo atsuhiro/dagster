@@ -7,7 +7,14 @@ from contextlib import contextmanager
 
 import scrapbook
 
-from dagster import check, Materialization, ModeDefinition, PipelineDefinition, RunConfig
+from dagster import (
+    check,
+    Materialization,
+    ModeDefinition,
+    PipelineDefinition,
+    RunConfig,
+    SolidDefinition,
+)
 from dagster.core.execution.api import scoped_pipeline_context
 from dagster.core.execution.context.logger import InitLoggerContext
 from dagster.core.execution.context_creation_pipeline import ResourcesStack
@@ -27,7 +34,7 @@ from .serialize import (
 
 class Manager:
     def __init__(self):
-        self.repository_def = None
+        self.handle = None
         self.populated_by_papermill = False
         self.pipeline_def = None
         self.solid_def = None
@@ -38,13 +45,37 @@ class Manager:
         self.solid_def_name = None
         self.resources_stack = None
 
-    def register_repository(self, repository_def):
-        self.repository_def = repository_def
+    def register(self, pipeline_def=None, solid_def=None):
+        '''Called by dagstermill.register_pipeline and dagstermill.register_solid.'''
+        check.opt_inst_param(pipeline_def, 'pipeline_def', PipelineDefinition)
+        check.opt_inst_param(solid_def, 'solid_def', SolidDefinition)
+        check.invariant(
+            pipeline_def is not None or solid_def is not None,
+            desc='Must register either a pipeline or a solid',
+        )
 
-    def deregister_repository(self):
-        # This function is intended to support test cases, and should not be invoked
-        # from user notebooks.
-        self.repository_def = None
+        if self.populated_by_papermill:
+            # Don't allow user code registration in in-pipeline execution
+            return
+
+        if pipeline_def is not None:
+            self.pipeline_def = pipeline_def
+
+        if solid_def is not None:
+            self.solid_def = solid_def
+
+    def deregister(self, pipeline=True, solid=True):
+        '''This function is intended to support test cases, and should not be invoked from user
+        notebooks.
+        '''
+        check.bool_param(pipeline, 'pipeline')
+        check.bool_param(solid, 'solid')
+
+        if pipeline:
+            self.pipeline_def = None
+
+        if solid:
+            self.solid_def = None
 
     @contextmanager
     def setup_resources(self, pipeline_def, environment_config, run_config, log_manager):
@@ -176,12 +207,11 @@ class Manager:
         logger_def = construct_logger(output_log_path)
         loggers = {'dagstermill': logger_def}
 
-        if self.repository_def is None:
-            self.solid_def = None
+        if self.pipeline_def is None:
             self.pipeline_def = PipelineDefinition(
-                [],
+                [self.solid_def] if self.solid_def else [],
                 mode_definitions=[ModeDefinition(loggers=loggers)],
-                name='Dummy Pipeline (No Repo Registration)',
+                name='Ephemeral Interactive Pipeline',
             )
             self.input_name_type_dict = dict_to_enum(input_name_type_dict)
             self.output_name_type_dict = dict_to_enum(output_name_type_dict)
@@ -203,12 +233,12 @@ class Manager:
             run_config = RunConfig(run_id=run_id, mode=mode)
 
         else:
-            self.pipeline_def = self.repository_def.get_pipeline(pipeline_name)
-            check.invariant(
-                self.pipeline_def.has_solid_def(solid_def_name),
-                'solid {} not found'.format(solid_def_name),
-            )
-            self.solid_def = self.pipeline_def.solid_def_named(solid_def_name)
+            if not self.solid_def:
+                check.invariant(
+                    self.pipeline_def.has_solid_def(solid_def_name),
+                    'solid {} not found'.format(solid_def_name),
+                )
+                self.solid_def = self.pipeline_def.solid_def_named(solid_def_name)
 
             logger = logger_def.logger_fn(
                 InitLoggerContext({}, self.pipeline_def, logger_def, run_id)

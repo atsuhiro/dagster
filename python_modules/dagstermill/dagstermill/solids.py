@@ -26,6 +26,7 @@ from dagster import (
 from dagster.core.errors import user_code_error_boundary
 from dagster.core.execution.context.system import SystemComputeExecutionContext
 from dagster.core.execution.context.transform import ComputeExecutionContext
+from dagster.core.types.field_utils import check_user_facing_opt_field_param
 from dagster.utils import mkdir_p
 
 from .engine import DagstermillNBConvertEngine
@@ -40,10 +41,12 @@ from .serialize import (
 from .translator import DagsterTranslator
 
 
-# This is a copy-paste from papermill.parameterize.parameterize_notebook
+# This is based on papermill.parameterize.parameterize_notebook
 # Typically, papermill injects the injected-parameters cell *below* the parameters cell
 # but we want to *replace* the parameters cell, which is what this function does.
-def replace_parameters(context, nb, parameters):
+def replace_parameters(
+    context, nb, parameters, register_pipeline=True, register_solid=True
+):
     '''Assigned parameters into the appropiate place in the input notebook
 
     Args:
@@ -52,6 +55,7 @@ def replace_parameters(context, nb, parameters):
     '''
     check.dict_param(parameters, 'parameters')
 
+    import pdb; pdb.set_trace()
     # Copy the nb object to avoid polluting the input
     nb = copy.deepcopy(nb)
 
@@ -148,7 +152,7 @@ def get_papermill_parameters(compute_context, inputs, output_log_path):
     return parameters
 
 
-def _dm_solid_transform(name, notebook_path):
+def _dm_solid_transform(name, notebook_path, register_pipeline=True, register_solid=True):
     check.str_param(name, 'name')
     check.str_param(notebook_path, 'notebook_path')
 
@@ -174,11 +178,14 @@ def _dm_solid_transform(name, notebook_path):
             output_log_path = output_log_file.name
             init_db(output_log_path)
 
+            # Scaffold the registration here
             nb = load_notebook_node(notebook_path)
             nb_no_parameters = replace_parameters(
                 system_compute_context,
                 nb,
                 get_papermill_parameters(system_compute_context, inputs, output_log_path),
+                register_pipeline=register_pipeline,
+                register_solid=register_solid
             )
             intermediate_path = os.path.join(
                 output_notebook_dir, '{prefix}-inter.ipynb'.format(prefix=str(uuid.uuid4()))
@@ -253,18 +260,51 @@ def _dm_solid_transform(name, notebook_path):
 
 
 def define_dagstermill_solid(
-    name, notebook_path, inputs=None, outputs=None, config_field=None, required_resources=None
+    name,
+    notebook_path,
+    inputs=None,
+    outputs=None,
+    config_field=None,
+    required_resources=None,
+    register_pipeline=True,
+    register_solid=True
 ):
+    '''Wrap a Jupyter notebook in a solid.
+
+    Arguments:
+        name (str): The name of the solid (passed to SolidDefinition)
+        notebook_path (str): Path to the backing notebook.
+        inputs (Optional[list[InputDefinition]]): The solid's inputs (passed to SolidDefinition).
+        outputs (Optional[list[OutputDefinition]]): The solid's output (passed to SolidDefinition).
+        required_resources (Optional[set[str]]): The string names of any require resources (passed
+            to SolidDefinition).
+        register_pipeline (Optional[bool]): Whether to register the pipeline when the solid is
+            executed (default True).
+        register_solid (Optional[bool]): Whether to register the solid when the solid is executed
+            (default True).
+
+    Returns:
+        SolidDefinition
+    '''
     check.str_param(name, 'name')
     check.str_param(notebook_path, 'notebook_path')
     inputs = check.opt_list_param(inputs, 'input_defs', of_type=InputDefinition)
     outputs = check.opt_list_param(outputs, 'output_defs', of_type=OutputDefinition)
     required_resources = check.opt_set_param(required_resources, 'required_resources', of_type=str)
+    check.bool_param(register_pipeline, 'register_pipeline')
+    check.bool_param(register_solid, 'register_solid')
+    config_field = check_user_facing_opt_field_param(
+        config_field,
+        'config_field',
+        'of a dagstermill solid named "{name}"'.format(name=name),
+    )
 
     return SolidDefinition(
         name=name,
         inputs=inputs,
-        compute_fn=_dm_solid_transform(name, notebook_path),
+        compute_fn=_dm_solid_transform(
+            name, notebook_path, register_pipeline=register_pipeline, register_solid=register_solid
+        ),
         outputs=outputs,
         config_field=config_field,
         required_resources=required_resources,

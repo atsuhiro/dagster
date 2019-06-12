@@ -1,8 +1,9 @@
-from dagster import check
+from dagster import check, RepositoryDefinition, PipelineDefinition, SolidDefinition
 from dagster.core.types.marshal import PickleSerializationStrategy
 
 from .errors import DagstermillError, DagsterUserCodeExecutionError
 from .manager import Manager, MANAGER_FOR_NOTEBOOK_INSTANCE
+from .register import register_pipeline, register_solid
 from .serialize import SerializableRuntimeType, read_value
 from .solids import define_dagstermill_solid
 
@@ -11,13 +12,15 @@ from .solids import define_dagstermill_solid
 # ipython kernel install --name "dagster" --user
 # python3 -m ipykernel install --user
 
+# Noop placeholder
+def register_repository(*args, **kwargs):
+    pass
 
-def register_repository(repo_def):
-    return MANAGER_FOR_NOTEBOOK_INSTANCE.register_repository(repo_def)
-
-
-def deregister_repository():
-    return MANAGER_FOR_NOTEBOOK_INSTANCE.deregister_repository()
+def deregister():
+    '''This function is intended to support test cases, and should not be invoked from user
+    notebooks.
+    '''
+    return MANAGER_FOR_NOTEBOOK_INSTANCE.deregister()
 
 
 def yield_result(value, output_name='result'):

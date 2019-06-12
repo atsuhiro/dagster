@@ -18,13 +18,21 @@ from dagstermill.serialize import SerializableRuntimeType
 
 
 @contextlib.contextmanager
-def in_pipeline_manager(register=True, **kwargs):
+def in_pipeline_manager(
+    register=True,
+    pipeline_name='hello_world_pipeline',
+    solid_def_name='hello_world',
+    **kwargs
+):
     repository_def = define_example_repository()
 
     manager = Manager()
 
     if register:
-        manager.register_repository(repository_def)
+        pipeline_def = repository_def.get_pipeline(pipeline_name)
+        manager.register(
+            pipeline_def=pipeline_def, solid_def=pipeline_def.solid_named(solid_def_name).definition
+        )
 
     run_id = str(uuid.uuid4())
 
@@ -36,8 +44,8 @@ def in_pipeline_manager(register=True, **kwargs):
                 {
                     'run_id': run_id,
                     'mode': 'default',
-                    'solid_def_name': 'hello_world',
-                    'pipeline_name': 'hello_world_pipeline',
+                    'solid_def_name': solid_def_name,
+                    'pipeline_name': pipeline_name,
                     'marshal_dir': marshal_dir,
                     'environment_config': {},
                     'output_log_path': output_log_file.name,
@@ -115,7 +123,10 @@ def test_in_notebook_manager_bad_load_parameter():
     try:
         with tempfile.NamedTemporaryFile() as output_log_file:
             repository_def = define_example_repository()
-            dagstermill.register_repository(repository_def)
+            dagstermill.register_pipeline(
+                pipeline_def=repository_def.get_pipeline('hello_world_pipeline')
+            )
+            
 
             context_dict = {
                 'run_id': run_id,
@@ -144,7 +155,7 @@ def test_in_notebook_manager_bad_complex_load_parameter():
 
     try:
         with tempfile.NamedTemporaryFile() as output_log_file:
-            dagstermill.deregister_repository()
+            dagstermill.deregister()
 
             context_dict = {
                 'run_id': run_id,
@@ -177,7 +188,9 @@ def test_in_notebook_manager_load_parameter():
     try:
         with tempfile.NamedTemporaryFile() as output_log_file:
             repository_def = define_example_repository()
-            dagstermill.register_repository(repository_def)
+            dagstermill.register_pipeline(
+                pipeline_def=repository_def.get_pipeline('test_add_pipeline')
+            )
 
             context_dict = {
                 'run_id': run_id,
@@ -203,7 +216,7 @@ def test_in_notebook_manager_load_parameter_pickleable():
 
     marshal_dir = tempfile.mkdtemp()
 
-    dagstermill.deregister_repository()
+    dagstermill.deregister()
 
     try:
         with tempfile.NamedTemporaryFile() as output_log_file:
